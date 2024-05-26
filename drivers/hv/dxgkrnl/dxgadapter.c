@@ -559,8 +559,8 @@ void dxgsharedresource_destroy(struct kref *refcount)
 		vfree(resource->runtime_private_data);
 	if (resource->resource_private_data)
 		vfree(resource->resource_private_data);
-	if (resource->alloc_private_data_sizes)
-		vfree(resource->alloc_private_data_sizes);
+	if (resource->alloc_info)
+		vfree(resource->alloc_info);
 	if (resource->alloc_private_data)
 		vfree(resource->alloc_private_data);
 	kfree(resource);
@@ -882,7 +882,7 @@ struct dxgallocation *dxgallocation_create(struct dxgprocess *process)
 void dxgallocation_stop(struct dxgallocation *alloc)
 {
 	if (alloc->pages) {
-		release_pages(alloc->pages, alloc->num_pages);
+		unpin_user_pages(alloc->pages, alloc->num_pages);
 		vfree(alloc->pages);
 		alloc->pages = NULL;
 	}

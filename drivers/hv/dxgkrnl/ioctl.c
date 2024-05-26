@@ -369,6 +369,7 @@ static int dxgsharedresource_seal(struct dxgsharedresource *shared_resource)
 	u32 data_size;
 	struct dxgresource *resource;
 	struct dxgallocation *alloc;
+	struct dxgsharedallocdata *alloc_info;
 
 	DXG_TRACE("Sealing resource: %p", shared_resource);
 
@@ -409,9 +410,10 @@ static int dxgsharedresource_seal(struct dxgsharedresource *shared_resource)
 			ret = -EINVAL;
 			goto cleanup1;
 		}
-		shared_resource->alloc_private_data_sizes =
-			vzalloc(sizeof(u32)*shared_resource->allocation_count);
-		if (shared_resource->alloc_private_data_sizes == NULL) {
+		shared_resource->alloc_info =
+			vzalloc(sizeof(struct dxgsharedallocdata) *
+				shared_resource->allocation_count);
+		if (shared_resource->alloc_info == NULL) {
 			ret = -EINVAL;
 			goto cleanup1;
 		}
@@ -429,8 +431,10 @@ static int dxgsharedresource_seal(struct dxgsharedresource *shared_resource)
 					ret = -EINVAL;
 					goto cleanup1;
 				}
-				shared_resource->alloc_private_data_sizes[i] =
-				    alloc_data_size;
+				alloc_info = &shared_resource->alloc_info[i];
+				alloc_info->private_data_size = alloc_data_size;
+				alloc_info->num_pages = alloc->num_pages;
+				alloc_info->cached = alloc->cached;
 				memcpy(private_data,
 				       alloc->priv_drv_data->data,
 				       alloc_data_size);
@@ -5031,6 +5035,7 @@ assign_resource_handles(struct dxgprocess *process,
 	u8 *cur_priv_data;
 	u32 total_priv_data_size = 0;
 	struct d3dddi_openallocationinfo2 open_alloc_info = { };
+	struct dxgsharedallocdata *alloc_info;
 
 	hmgrtable_lock(&process->handle_table, DXGLOCK_EXCL);
 	ret = hmgrtable_assign_handle(&process->handle_table, resource,
@@ -5050,11 +5055,15 @@ assign_resource_handles(struct dxgprocess *process,
 		allocs[i]->alloc_handle = handles[i];
 		allocs[i]->handle_valid = 1;
 		open_alloc_info.allocation = handles[i];
-		if (shared_resource->alloc_private_data_sizes)
+		if (shared_resource->alloc_info) {
+			alloc_info = &shared_resource->alloc_info[i];
 			open_alloc_info.priv_drv_data_size =
-			    shared_resource->alloc_private_data_sizes[i];
-		else
+			    alloc_info->private_data_size;
+			allocs[i]->num_pages = alloc_info->num_pages;
+			allocs[i]->cached  = alloc_info->cached;
+		} else {
 			open_alloc_info.priv_drv_data_size = 0;
+		}
 
 		total_priv_data_size += open_alloc_info.priv_drv_data_size;
 		open_alloc_info.priv_drv_data = cur_priv_data;
@@ -5364,18 +5373,12 @@ dxgkio_enum_processes(struct dxgprocess *process, void *__user inargs)
 	struct dxgprocess_adapter *pentry;
 	int nump = 0;	/* Current number of processes*/
 	struct ntstatus status;
-	int ret;
+	int ret, ret1;
 
 	ret = copy_from_user(&args, inargs, sizeof(args));
 	if (ret) {
 		DXG_ERR("failed to copy input args");
 		ret = -EFAULT;
-		goto cleanup;
-	}
-
-	if (args.buffer_count == 0) {
-		DXG_ERR("Invalid buffer count");
-		ret = -EINVAL;
 		goto cleanup;
 	}
 
@@ -5396,6 +5399,19 @@ dxgkio_enum_processes(struct dxgprocess *process, void *__user inargs)
 		goto cleanup_locks;
 	}
 
+	list_for_each_entry(pentry, &adapter->adapter_process_list_head,
+			    adapter_process_list_entry) {
+		if (pentry->process->nspid == task_active_pid_ns(current))
+			nump++;
+	}
+
+	if (nump > args.buffer_count || args.buffer == NULL) {
+		status.v = STATUS_BUFFER_TOO_SMALL;
+		ret = ntstatus2int(status);
+		goto cleanup_locks;
+	}
+
+	nump = 0;
 	list_for_each_entry(pentry, &adapter->adapter_process_list_head,
 			    adapter_process_list_entry) {
 		if (pentry->process->nspid != task_active_pid_ns(current))
@@ -5420,10 +5436,10 @@ cleanup_locks:
 	dxgglobal_release_process_adapter_lock();
 	dxgglobal_release_adapter_list_lock(DXGLOCK_SHARED);
 
-	if (ret == 0) {
-		ret = copy_to_user(&input->buffer_count, &nump, sizeof(u32));
-		if (ret)
-			DXG_ERR("failed to copy buffer count to user");
+	ret1 = copy_to_user(&input->buffer_count, &nump, sizeof(u32));
+	if (ret1) {
+		DXG_ERR("failed to copy buffer count to user");
+		ret = -EFAULT;
 	}
 
 cleanup:
