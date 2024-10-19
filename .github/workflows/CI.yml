@@ -44,12 +44,12 @@ jobs:
           INSTALL_MOD_PATH=./artifact make modules_install
           find ./artifact/lib/modules/ -type l | xargs rm
       - name: Deliver buildinfo
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: kernal_and_modules
           path: ./artifact/
       - name: Upload release asset
-        uses: svenstaro/upload-release-action@v2
+        uses: svenstaro/upload-release-action@v4
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ./artifact/**
