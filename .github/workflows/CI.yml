@@ -49,7 +49,7 @@ jobs:
           name: kernal_and_modules
           path: ./artifact/
       - name: Upload release asset
-        uses: svenstaro/upload-release-action@v4
+        uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ./artifact/**
